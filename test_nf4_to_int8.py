@@ -274,6 +274,47 @@ def test_dense_bf16_pin():
             assert st.tensors["model.norm.weight"].dtype == "BF16"
 
 
+def test_sharded_bf16_pin():
+    out_f, in_f = 8, 64
+    w = demo_weights(out_f * in_f)
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / "src"
+        src.mkdir()
+        write_safetensors(
+            str(src / "model-00001-of-00002.safetensors"),
+            [("model.layers.0.mlp.down_proj.weight", "BF16", (out_f, in_f), pack_bf16(w))],
+        )
+        write_safetensors(
+            str(src / "model-00002-of-00002.safetensors"),
+            [
+                ("model.layers.1.mlp.down_proj.weight", "BF16", (out_f, in_f), pack_bf16(w)),
+                ("model.norm.weight", "BF16", (8,), pack_bf16([1.0] * 8)),
+            ],
+        )
+        (src / "model.safetensors.index.json").write_text(
+            json.dumps(
+                {
+                    "weight_map": {
+                        "model.layers.0.mlp.down_proj.weight": "model-00001-of-00002.safetensors",
+                        "model.layers.1.mlp.down_proj.weight": "model-00002-of-00002.safetensors",
+                        "model.norm.weight": "model-00002-of-00002.safetensors",
+                    }
+                }
+            )
+            + "\n"
+        )
+        (src / "config.json").write_text(json.dumps({"model_type": "phi3"}) + "\n")
+        dst = Path(td) / "pin"
+        got = convert_pin(src, dst, policy=Policy(dense="int8", embed="copy"))
+        pin = got["pin"]
+        assert pin["n_shards"] == 2
+        assert pin["n_dense_modules"] == 2
+        with SafeTensorsFile(str(dst / "model.safetensors")) as st:
+            assert st.tensors["model.layers.0.mlp.down_proj.weight"].dtype == "I8"
+            assert st.tensors["model.layers.1.mlp.down_proj.weight"].dtype == "I8"
+            assert st.tensors["model.norm.weight"].dtype == "BF16"
+
+
 def test_dense_copy_policy():
     out_f, in_f = 8, 64
     w = demo_weights(out_f * in_f)
@@ -393,6 +434,7 @@ if __name__ == "__main__":
     test_double_quant_module_pin()
     test_bf16_roundtrip_bits()
     test_dense_bf16_pin()
+    test_sharded_bf16_pin()
     test_dense_copy_policy()
     test_refuse_gptq()
     test_refuse_nf4_without_allow_requant()

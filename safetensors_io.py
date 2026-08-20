@@ -77,6 +77,40 @@ class SafeTensorsFile:
         return list(self.tensors.keys())
 
 
+class SafeTensorsSet:
+    """One or more safetensors files as a single name catalog (HF shards)."""
+
+    def __init__(self, files: List[SafeTensorsFile]):
+        if not files:
+            raise ValueError("SafeTensorsSet needs at least one file")
+        self.files = files
+        self.path = files[0].path
+        self.tensors: Dict[str, TensorInfo] = {}
+        self._owner: Dict[str, SafeTensorsFile] = {}
+        for f in files:
+            for name, info in f.tensors.items():
+                if name in self.tensors:
+                    raise ValueError(f"duplicate tensor across shards: {name}")
+                self.tensors[name] = info
+                self._owner[name] = f
+
+    def names(self) -> List[str]:
+        return list(self.tensors.keys())
+
+    def read_bytes(self, name: str) -> bytes:
+        return self._owner[name].read_bytes(name)
+
+    def close(self) -> None:
+        for f in self.files:
+            f.close()
+
+    def __enter__(self) -> "SafeTensorsSet":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
+
+
 def _align8(n: int) -> int:
     return (n + 7) & ~7
 
