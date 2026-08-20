@@ -1,6 +1,5 @@
+cuda/*.so
+cuda/*.o
 __pycache__/
 *.pyc
 out/
-.venv/
-*.i8.bin
-*.scale.f32.bin
