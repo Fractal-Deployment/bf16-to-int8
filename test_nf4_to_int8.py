@@ -421,6 +421,34 @@ def test_nested_nf8_pin():
             assert plug == pl
 
 
+def test_gpu_compare_within_half_scale():
+    from gpu_quant import compare_bf16_i8, gpu_quant_available, quant_bf16_i8
+
+    if not gpu_quant_available():
+        print("SKIP test_gpu_compare_within_half_scale (no libquant_i8.so)")
+        return
+    w = [0.3] * 63 + [1.0]
+    raw = pack_bf16(w)
+    got = quant_bf16_i8(raw, 64)
+    assert got is not None
+    q8, scales = got
+    err = compare_bf16_i8(raw, q8, scales, 64)
+    assert err is not None
+    assert err["n"] == 64
+    assert err["n_over_half_scale"] == 0
+    assert err["rmse"] > 0.0
+    half = 0.5 * scales[0]
+    assert err["max_abs"] <= half + 1e-6
+    zraw = pack_bf16([0.0] * 64)
+    zgot = quant_bf16_i8(zraw, 64)
+    assert zgot is not None
+    zerr = compare_bf16_i8(zraw, zgot[0], zgot[1], 64)
+    assert zerr is not None
+    assert zerr["rmse"] == 0.0
+    assert zerr["max_abs"] == 0.0
+    assert zerr["n_over_half_scale"] == 0
+
+
 if __name__ == "__main__":
     test_codebook_ends()
     test_nf4_roundtrip_zero_and_scale()
@@ -440,4 +468,5 @@ if __name__ == "__main__":
     test_refuse_nf4_without_allow_requant()
     test_bf16_to_nf4_pin()
     test_nested_nf8_pin()
-    print("TEST_NF4_TO_INT8_GREEN bf16_to_int8 bf16_to_nf4 nested_nf8 refuse_requant NOT_train_ok")
+    test_gpu_compare_within_half_scale()
+    print("TEST_NF4_TO_INT8_GREEN bf16_to_int8 bf16_to_nf4 nested_nf8 refuse_requant gpu_compare NOT_train_ok")
