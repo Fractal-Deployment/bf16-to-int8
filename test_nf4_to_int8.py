@@ -274,6 +274,47 @@ def test_dense_bf16_pin():
             assert st.tensors["model.norm.weight"].dtype == "BF16"
 
 
+def test_sharded_bf16_pin():
+    out_f, in_f = 8, 64
+    w = demo_weights(out_f * in_f)
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / "src"
+        src.mkdir()
+        write_safetensors(
+            str(src / "model-00001-of-00002.safetensors"),
+            [("model.layers.0.mlp.down_proj.weight", "BF16", (out_f, in_f), pack_bf16(w))],
+        )
+        write_safetensors(
+            str(src / "model-00002-of-00002.safetensors"),
+            [
+                ("model.layers.1.mlp.down_proj.weight", "BF16", (out_f, in_f), pack_bf16(w)),
+                ("model.norm.weight", "BF16", (8,), pack_bf16([1.0] * 8)),
+            ],
+        )
+        (src / "model.safetensors.index.json").write_text(
+            json.dumps(
+                {
+                    "weight_map": {
+                        "model.layers.0.mlp.down_proj.weight": "model-00001-of-00002.safetensors",
+                        "model.layers.1.mlp.down_proj.weight": "model-00002-of-00002.safetensors",
+                        "model.norm.weight": "model-00002-of-00002.safetensors",
+                    }
+                }
+            )
+            + "\n"
+        )
+        (src / "config.json").write_text(json.dumps({"model_type": "phi3"}) + "\n")
+        dst = Path(td) / "pin"
+        got = convert_pin(src, dst, policy=Policy(dense="int8", embed="copy"))
+        pin = got["pin"]
+        assert pin["n_shards"] == 2
+        assert pin["n_dense_modules"] == 2
+        with SafeTensorsFile(str(dst / "model.safetensors")) as st:
+            assert st.tensors["model.layers.0.mlp.down_proj.weight"].dtype == "I8"
+            assert st.tensors["model.layers.1.mlp.down_proj.weight"].dtype == "I8"
+            assert st.tensors["model.norm.weight"].dtype == "BF16"
+
+
 def test_dense_copy_policy():
     out_f, in_f = 8, 64
     w = demo_weights(out_f * in_f)
@@ -380,6 +421,34 @@ def test_nested_nf8_pin():
             assert plug == pl
 
 
+def test_gpu_compare_within_half_scale():
+    from gpu_quant import compare_bf16_i8, gpu_quant_available, quant_bf16_i8
+
+    if not gpu_quant_available():
+        print("SKIP test_gpu_compare_within_half_scale (no libquant_i8.so)")
+        return
+    w = [0.3] * 63 + [1.0]
+    raw = pack_bf16(w)
+    got = quant_bf16_i8(raw, 64)
+    assert got is not None
+    q8, scales = got
+    err = compare_bf16_i8(raw, q8, scales, 64)
+    assert err is not None
+    assert err["n"] == 64
+    assert err["n_over_half_scale"] == 0
+    assert err["rmse"] > 0.0
+    half = 0.5 * scales[0]
+    assert err["max_abs"] <= half + 1e-6
+    zraw = pack_bf16([0.0] * 64)
+    zgot = quant_bf16_i8(zraw, 64)
+    assert zgot is not None
+    zerr = compare_bf16_i8(zraw, zgot[0], zgot[1], 64)
+    assert zerr is not None
+    assert zerr["rmse"] == 0.0
+    assert zerr["max_abs"] == 0.0
+    assert zerr["n_over_half_scale"] == 0
+
+
 if __name__ == "__main__":
     test_codebook_ends()
     test_nf4_roundtrip_zero_and_scale()
@@ -393,9 +462,11 @@ if __name__ == "__main__":
     test_double_quant_module_pin()
     test_bf16_roundtrip_bits()
     test_dense_bf16_pin()
+    test_sharded_bf16_pin()
     test_dense_copy_policy()
     test_refuse_gptq()
     test_refuse_nf4_without_allow_requant()
     test_bf16_to_nf4_pin()
     test_nested_nf8_pin()
-    print("TEST_NF4_TO_INT8_GREEN bf16_to_int8 bf16_to_nf4 nested_nf8 refuse_requant NOT_train_ok")
+    test_gpu_compare_within_half_scale()
+    print("TEST_NF4_TO_INT8_GREEN bf16_to_int8 bf16_to_nf4 nested_nf8 refuse_requant gpu_compare NOT_train_ok")

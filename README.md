@@ -14,6 +14,7 @@ python3 nf4_to_int8.py pin --src /path/to/phi-4-mini-bf16 --out /path/to/nested-
 
 
 python3 nf4_to_int8.py pin --src model.safetensors --out /tmp/pin --dry-run
+# HF snapshots with model.safetensors.index.json (2+ shards) are read as one catalog.
 ```
 
 Already-quantized NF4 is **refused** unless `--allow-requant` (lossy second hop; cannot restore BF16).

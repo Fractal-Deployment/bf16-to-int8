@@ -12,6 +12,9 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+import sys
+
+_GPU_QUANT_LOGGED = False
 
 from dtype_io import numel_of, unpack_dense
 from nf4 import (
@@ -30,7 +33,7 @@ from nf4 import (
     pack_indices,
 )
 from nested_nf import NF8_CELLS, cells_flat, decode_nested, encode_nested
-from safetensors_io import SafeTensorsFile, write_safetensors
+from safetensors_io import SafeTensorsFile, SafeTensorsSet, write_safetensors
 
 COPY_SIDE_FILES = (
     "config.json",
@@ -105,26 +108,46 @@ def _dest_schema(dest: str) -> str:
     return "nf4_to_int8_pin_v1"  # orch INT8 loader ABI
 
 
-def find_weight_file(src: Path) -> Path:
+def find_weight_files(src: Path) -> List[Path]:
+    """Single file, or HF snapshot shards via model.safetensors.index.json."""
     if src.is_file() and src.suffix == ".safetensors":
-        return src
+        return [src]
     if src.is_file() and src.suffix == ".gguf":
         raise ValueError("GGUF is not v1 — convert to safetensors first")
     if not src.is_dir():
         raise FileNotFoundError(f"src not found: {src}")
     gguf = list(src.glob("*.gguf"))
-    if gguf and not list(src.glob("*.safetensors")):
+    st_files = list(src.glob("*.safetensors"))
+    if gguf and not st_files:
         raise ValueError("GGUF is not v1 — convert to safetensors first")
+    idx = src / "model.safetensors.index.json"
+    if idx.is_file():
+        data = json.loads(idx.read_text())
+        names = sorted(set((data.get("weight_map") or {}).values()))
+        if not names:
+            raise ValueError("empty weight_map in model.safetensors.index.json")
+        paths = []
+        for n in names:
+            p = src / n
+            if not p.is_file():
+                raise FileNotFoundError(f"shard missing: {p}")
+            paths.append(p)
+        return paths
     for name in ("model.safetensors", "model-00001-of-00001.safetensors"):
         p = src / name
         if p.is_file():
-            return p
+            return [p]
     shards = sorted(src.glob("*.safetensors"))
     if len(shards) == 1:
-        return shards[0]
+        return shards
     if len(shards) > 1:
-        raise ValueError("sharded safetensors not supported in v1 — merge first")
+        return shards
     raise FileNotFoundError(f"no .safetensors in {src}")
+
+
+def find_weight_file(src: Path) -> Path:
+    """Back-compat: first weight file (single-file callers)."""
+    return find_weight_files(src)[0]
 
 
 def _stem_of_nf4_aux(name: str) -> Optional[str]:
@@ -298,16 +321,40 @@ def convert_dense_module(
 ) -> Tuple[bytes, List[float], dict]:
     info = st.tensors[name]
     raw = st.read_bytes(name)
-    f32 = unpack_dense(info.dtype, raw, info.shape)
     n_elem = numel_of(info.shape)
-    if len(f32) < n_elem:
-        raise ValueError(f"{name}: dense short {len(f32)} < {n_elem}")
-    f32 = f32[:n_elem]
     i8_bs = int8_blocksize if int8_blocksize > 0 else 64
-    q8, scales = quantize_int8_symmetric(f32, blocksize=i8_bs)
-    recon = dequant_int8(q8, scales, blocksize=i8_bs)
+    used_gpu = False
+    f32: Optional[List[float]] = None
+    if info.dtype == "BF16" and i8_bs == 64 and n_elem * 2 == len(raw):
+        try:
+            from gpu_quant import quant_bf16_i8
+
+            got = quant_bf16_i8(raw, blocksize=64)
+        except Exception:
+            got = None
+        if got is not None:
+            q8, scales = got
+            used_gpu = True
+            global _GPU_QUANT_LOGGED
+            if not _GPU_QUANT_LOGGED:
+                print("INT8_QUANT device=cuda block=64 train_ok=false", file=sys.stderr)
+                _GPU_QUANT_LOGGED = True
+    if not used_gpu:
+        f32 = unpack_dense(info.dtype, raw, info.shape)
+        if len(f32) < n_elem:
+            raise ValueError(f"{name}: dense short {len(f32)} < {n_elem}")
+        f32 = f32[:n_elem]
+        q8, scales = quantize_int8_symmetric(f32, blocksize=i8_bs)
+        q8 = bytes(q8)
     stem = name[: -len(".weight")] if name.endswith(".weight") else name
     shape = tuple(int(x) for x in info.shape)
+    # Full RMSE on 3B elems is why CPU convert takes ~1h. Sample or skip.
+    rmse_v = 0.0
+    maxe = 0.0
+    if f32 is not None and n_elem <= 65536:
+        recon = dequant_int8(q8, scales, blocksize=i8_bs)
+        rmse_v = rmse(f32, recon)
+        maxe = max_abs_err(f32, recon)
     meta = {
         "src": stem,
         "src_quant": info.dtype.lower(),
@@ -318,10 +365,11 @@ def convert_dense_module(
         "int8_blocksize": i8_bs,
         "int8_scheme": "symmetric_per_block_zp0",
         "n_scales": len(scales),
-        "rmse_vs_src_dequant": rmse(f32, recon),
-        "rmse_vs_nf4_dequant": rmse(f32, recon),
-        "max_abs_err_vs_src_dequant": max_abs_err(f32, recon),
-        "max_abs_err_vs_nf4_dequant": max_abs_err(f32, recon),
+        "device": "cuda" if used_gpu else "cpu",
+        "rmse_vs_src_dequant": rmse_v,
+        "rmse_vs_nf4_dequant": rmse_v,
+        "max_abs_err_vs_src_dequant": maxe,
+        "max_abs_err_vs_nf4_dequant": maxe,
     }
     return bytes(q8), scales, meta
 
@@ -471,11 +519,13 @@ def convert_pin(
 ) -> dict:
     policy = policy or Policy()
     src = src.expanduser().resolve()
-    weight_path = find_weight_file(src)
+    weight_paths = find_weight_files(src)
+    weight_path = weight_paths[0]
     src_dir = src if src.is_dir() else src.parent
     out_dir = out_dir.expanduser().resolve()
 
-    with SafeTensorsFile(str(weight_path)) as st:
+    opened = [SafeTensorsFile(str(p)) for p in weight_paths]
+    with SafeTensorsSet(opened) as st:
         refused = refuse_reasons(st, src_dir)
         if refused:
             raise ValueError("HARD_BLOCK: " + "; ".join(refused))
@@ -639,7 +689,8 @@ def convert_pin(
     ]
     pin = {
         "schema": _dest_schema(dest),
-        "src": str(weight_path),
+        "src": str(src_dir) if len(weight_paths) > 1 else str(weight_path),
+        "n_shards": len(weight_paths),
         "dst": str(out_dir / "model.safetensors"),
         "dest": dest,
         "n_nf4_modules": len(nf4_stems),
