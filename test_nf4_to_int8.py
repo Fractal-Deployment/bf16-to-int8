@@ -421,6 +421,35 @@ def test_nested_nf8_pin():
             assert plug == pl
 
 
+def test_int8_schema_strings():
+    from pin_convert import INT8_PIN_SCHEMA, INT8_PIN_SCHEMA_LEGACY, _dest_schema
+
+    assert INT8_PIN_SCHEMA == "bf16_to_int8_pin_v1"
+    assert INT8_PIN_SCHEMA_LEGACY == "nf4_to_int8_pin_v1"
+    assert _dest_schema("int8") == INT8_PIN_SCHEMA
+    assert _dest_schema("int8") != INT8_PIN_SCHEMA_LEGACY
+    assert _dest_schema("nested-nf8") == "nested_nf8_pin_v1"
+
+
+def test_web_title_dest_is_bf16():
+    html = (ROOT / "web" / "index.html").read_text()
+    assert "<title>BF16 → INT8 pin</title>" in html
+    assert "<title>NF4 → INT8 pin</title>" not in html
+    assert "bf16_to_int8.py pin" in html
+
+
+def test_prompt_hub_urls():
+    for name in (
+        "GROK_BUILD_ORCH_INT8_LOADER_PROMPT.md",
+        "GROK_BUILD_ORCH_NESTED_NF8_PROMPT.md",
+    ):
+        text = (ROOT / name).read_text()
+        assert "Jadon-Fox/nf4-to-int8" not in text
+        assert "github.com/Fractal-Deployment/bf16-to-int8" in text
+        assert "Jadon-Fox/training_orchestrator" not in text
+        assert "Fractal-Deployment/training_orchestrator" in text
+
+
 def test_gpu_compare_within_half_scale():
     from gpu_quant import compare_bf16_i8, gpu_quant_available, quant_bf16_i8
 
@@ -468,5 +497,8 @@ if __name__ == "__main__":
     test_refuse_nf4_without_allow_requant()
     test_bf16_to_nf4_pin()
     test_nested_nf8_pin()
+    test_int8_schema_strings()
+    test_web_title_dest_is_bf16()
+    test_prompt_hub_urls()
     test_gpu_compare_within_half_scale()
     print("TEST_NF4_TO_INT8_GREEN bf16_to_int8 bf16_to_nf4 nested_nf8 refuse_requant gpu_compare NOT_train_ok")
