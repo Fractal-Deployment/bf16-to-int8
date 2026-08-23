@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Golden checks. Codebook + roundtrip + pin. Not train_ok."""
+"""Hangover filename. Golden checks for bf16_to_int8 / nf4_to_int8 alias. Not train_ok."""
 from __future__ import annotations
 
 import json

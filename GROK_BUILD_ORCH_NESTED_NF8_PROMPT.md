@@ -4,7 +4,7 @@ You are in **Jadon-Fox/training_orchestrator** (C-native, RTX 3060, H-TILE NF4).
 
 ## Job
 
-Load **nested NF8** pins from https://github.com/Jadon-Fox/nf4-to-int8 (`schema: nested_nf8_pin_v1`).
+Load **nested NF8** pins from https://github.com/Fractal-Deployment/bf16-to-int8 (`schema: nested_nf8_pin_v1`). Nested dest is **not** `bf16_to_int8_pin_v1`.
 
 This is **not** uniform INT8. **Not** IEEE bitplanes. Hole = existing NF4 nibble (the 16 Gaussian cells). Plug = 4-bit sub-index **inside that cell**. Reconstruction:
 
