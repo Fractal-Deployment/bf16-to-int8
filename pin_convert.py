@@ -1,8 +1,9 @@
 """Offline model → INT8 pin.
 
-Sources: NF4 (bnb/Unsloth, ± double-quant), FP4-with-map, dense BF16/F16/F32.
-Dest: nf4_to_int8_pin_v1 (loader ABI unchanged).
+Default hop: dense BF16/F16/F32 → INT8 (schema bf16_to_int8_pin_v1).
+NF4/FP4 sources are a lossy second hop (HARD_BLOCK unless --allow-requant).
 
+Dest ABI: bf16_to_int8_pin_v1 (legacy string nf4_to_int8_pin_v1 still loads).
 One-time. Not dest-pack. Not orch hot path. train_ok=false.
 """
 from __future__ import annotations
@@ -100,12 +101,17 @@ class Policy:
     # norms always copy
 
 
+INT8_PIN_SCHEMA = "bf16_to_int8_pin_v1"
+INT8_PIN_SCHEMA_LEGACY = "nf4_to_int8_pin_v1"
+INT8_PIN_QUANT_METHOD = "bf16_to_int8_pin"
+
+
 def _dest_schema(dest: str) -> str:
     if dest == "nf4":
         return "bf16_to_nf4_pin_v1"
     if dest == "nested-nf8":
         return "nested_nf8_pin_v1"
-    return "nf4_to_int8_pin_v1"  # orch INT8 loader ABI
+    return INT8_PIN_SCHEMA  # orch INT8 loader ABI (legacy nf4_to_int8_pin_v1 still loads)
 
 
 def find_weight_files(src: Path) -> List[Path]:
@@ -720,7 +726,8 @@ def convert_pin(
         except json.JSONDecodeError:
             cfg = {}
         cfg["quantization_config"] = {
-            "quant_method": "nf4_to_int8_pin",
+            "quant_method": INT8_PIN_QUANT_METHOD,
+            "quant_method_legacy": "nf4_to_int8_pin",
             "load_in_8bit": True,
             "int8_scheme": "symmetric_per_block_zp0",
             "int8_blocksize": int8_blocksize,

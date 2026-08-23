@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""NF4 → INT8.
+"""BF16/F16 → INT8 pin (preferred). CLI filename is a hangover.
 
-  # one-time model pin (Unsloth / bnb safetensors → INT8 pin dir)
-  python3 nf4_to_int8.py pin --src /path/to/bnb-4bit --out /path/to/int8-pin
+  python3 bf16_to_int8.py pin --src /path/to/phi-4-mini-bf16 --out /path/to/int8-pin
+  python3 nf4_to_int8.py pin --src /path/to/phi-4-mini-bf16 --out /path/to/int8-pin
 
-  # single tensor
-  python3 nf4_to_int8.py --demo
-  python3 nf4_to_int8.py tensor --qweight w.nf4.bin --absmax w.absmax.f32.bin --n-elem 4096
+NF4/bnb-4bit sources need --allow-requant (lossy). Product hop is dense BF16.
 
 Offline pin. Not a dest-pack flip. Not train_ok.
 """

@@ -146,7 +146,7 @@ def test_pin_single_quant_roundtrip():
             assert st.tensors["model.norm.weight"].dtype == "BF16"
             assert "model.layers.0.mlp.down_proj.weight.absmax" not in st.tensors
         cfg = json.loads((dst / "config.json").read_text())
-        assert cfg["quantization_config"]["quant_method"] == "nf4_to_int8_pin"
+        assert cfg["quantization_config"]["quant_method"] == "bf16_to_int8_pin"
 
 
 def test_cli_pin_dry_run():
@@ -185,7 +185,7 @@ def test_fixture_cli():
             text=True,
         )
         pin = json.loads(r.stdout)
-        assert pin["schema"] == "nf4_to_int8_pin_v1"
+        assert pin["schema"] == "bf16_to_int8_pin_v1"
         assert pin["train_ok"] is False
         assert (Path(td) / "int8_pin" / "model.safetensors").is_file()
         assert (Path(td) / "int8_pin" / "pin.json").is_file()

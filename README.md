@@ -2,8 +2,12 @@
 
 **Download BF16 (or F16). Convert once.** Do not download GGUF/GPTQ/AWQ/Unsloth-4bit and requant.
 
+Repo name hangover was `nf4-to-int8`. Canonical dest schema is `bf16_to_int8_pin_v1`. NF4→INT8 is a lossy second hop (`--allow-requant` only).
+
 ```bash
 # default: BF16/F16 safetensors → INT8 pin (orch loader ABI)
+python3 bf16_to_int8.py pin --src /path/to/phi-4-mini-bf16 --out /path/to/int8-pin --to int8
+# hangover CLI name (same entry):
 python3 nf4_to_int8.py pin --src /path/to/phi-4-mini-bf16 --out /path/to/int8-pin --to int8
 
 # fit case: same source → NF4 pin
@@ -33,7 +37,7 @@ GPTQ, AWQ, GGUF: refuse. Get the HuggingFace **BF16/F16** tree.
 
 | dest | when |
 |------|------|
-| **INT8** | better unfold from BF16, ~8 bit, orch `nf4_to_int8_pin_v1` loader |
+| **INT8** | better unfold from BF16, ~8 bit, orch `bf16_to_int8_pin_v1` loader |
 | **NF4** | need to **fit** on 12 GB. Better 4-bit than INT4 for QLoRA-style dequant. Schema `bf16_to_nf4_pin_v1` |
 
 Ampere still GEMMs in f16/f32. Storage only. `train_ok=false`.
