@@ -1,6 +1,6 @@
 # Paste this into Grok Build CLI (training_orchestrator)
 
-You are working in **Jadon-Fox/training_orchestrator** (C-native orch, RTX 3060, Unsloth Phi-4-mini NF4 pin).
+You are working in **Fractal-Deployment/training_orchestrator** (C-native orch, RTX 3060, Unsloth Phi-4-mini NF4 pin).
 
 ## Job
 

@@ -1,6 +1,6 @@
 # Paste this into Grok Build CLI (training_orchestrator)
 
-You are in **Jadon-Fox/training_orchestrator** (C-native, RTX 3060, H-TILE NF4).
+You are in **Fractal-Deployment/training_orchestrator** (C-native, RTX 3060, H-TILE NF4).
 
 ## Job
 
