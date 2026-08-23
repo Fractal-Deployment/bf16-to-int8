@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BF16/F16 → INT8 pin (preferred). CLI filename is a hangover.
+"""Hangover filename. Documented alias of bf16_to_int8.py. Dest hop is BF16/F16 → INT8.
 
   python3 bf16_to_int8.py pin --src /path/to/phi-4-mini-bf16 --out /path/to/int8-pin
   python3 nf4_to_int8.py pin --src /path/to/phi-4-mini-bf16 --out /path/to/int8-pin
