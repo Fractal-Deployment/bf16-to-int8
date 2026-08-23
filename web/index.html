@@ -106,7 +106,7 @@ python3 nf4_to_int8.py pin --src /path/to/bf16-model --out /path/to/nf4-pin --to
       for(let i=0;i<512;i++){ const r=i8.q[i]*i8.sc[Math.floor(i/64)]; const d=f32[i]-r; acc+=d*d; mx=Math.max(mx,Math.abs(d)); }
       const rmse=Math.sqrt(acc/512);
       document.getElementById("out").textContent =
-        `pin schema          nf4_to_int8_pin_v1\n`+
+        `pin schema          bf16_to_int8_pin_v1\n`+
         `module              lin.weight  [8, 64]\n`+
         `src                 nf4  double_quant=demo\n`+
         `dst                 I8 + int8_scale[8]\n`+

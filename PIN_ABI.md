@@ -4,7 +4,7 @@ Default source is **dense BF16/F16**. Dest:
 
 | `--to` | schema | orch |
 |---|---|---|
-| `int8` | `nf4_to_int8_pin_v1` | INT8 pin loader L0 |
+| `int8` | `bf16_to_int8_pin_v1` (legacy `nf4_to_int8_pin_v1` still loads) | INT8 pin loader L0 |
 | `nf4` | `bf16_to_nf4_pin_v1` | fit, owned NF4 |
 | `nested-nf8` | `nested_nf8_pin_v1` | hole=NF4 nibble, plug=4-bit sub-cell. `w=NF8_CELLS[h][p]*absmax` |
 
@@ -32,7 +32,7 @@ L0 expand at load. L1 H-TILE: `cp.async` hole + plug, lookup `NF8_CELLS[hole][pl
   model.safetensors
   pin.json
   CONVERT_REPORT.json
-  config.json                 # quantization_config.quant_method = nf4_to_int8_pin
+  config.json                 # quantization_config.quant_method = bf16_to_int8_pin
   tokenizer* / generation_*   # copied if present
 ```
 
@@ -40,7 +40,7 @@ L0 expand at load. L1 H-TILE: `cp.async` hole + plug, lookup `NF8_CELLS[hole][pl
 
 ```json
 {
-  "schema": "nf4_to_int8_pin_v1",
+  "schema": "bf16_to_int8_pin_v1",
   "n_nf4_modules": 122,
   "n_passthrough": 72,
   "int8_blocksize": 64,
@@ -49,11 +49,11 @@ L0 expand at load. L1 H-TILE: `cp.async` hole + plug, lookup `NF8_CELLS[hole][pl
 }
 ```
 
-Loader still requires `schema=nf4_to_int8_pin_v1`. Extra keys are informational:
+Loader requires `schema=bf16_to_int8_pin_v1` (or legacy `nf4_to_int8_pin_v1`). Extra keys are informational:
 
 ```json
 {
-  "schema": "nf4_to_int8_pin_v1",
+  "schema": "bf16_to_int8_pin_v1",
   "n_nf4_modules": 122,
   "n_dense_modules": 6,
   "n_converted": 128,
