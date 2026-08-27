@@ -40,6 +40,6 @@ GPTQ, AWQ, GGUF: refuse. Get the HuggingFace **BF16/F16** tree.
 | **INT8** | better unfold from BF16, ~8 bit, orch `bf16_to_int8_pin_v1` loader |
 | **NF4** | need to **fit** on 12 GB. Better 4-bit than INT4 for QLoRA-style dequant. Schema `bf16_to_nf4_pin_v1` |
 
-Ampere still GEMMs in f16/f32. Storage only. `train_ok=false`.
+Ampere still GEMMs in f16/f32. Storage only. Meaning Version: 0.3.4.
 
 INT4 dest is not offered (worse unfold than NF4 at the same size).
