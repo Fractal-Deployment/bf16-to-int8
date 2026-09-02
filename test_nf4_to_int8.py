@@ -429,6 +429,7 @@ def test_int8_schema_strings():
     assert _dest_schema("int8") == INT8_PIN_SCHEMA
     assert _dest_schema("int8") != INT8_PIN_SCHEMA_LEGACY
     assert _dest_schema("nested-nf8") == "nested_nf8_pin_v1"
+    assert _dest_schema("mapped-int8") == "keystone_int8_pin_v1"
 
 
 def test_web_title_dest_is_bf16():
@@ -478,6 +479,153 @@ def test_gpu_compare_within_half_scale():
     assert zerr["n_over_half_scale"] == 0
 
 
+def test_keystone_bit_exact_and_int8_match():
+    from keystone import compare_paths
+
+    w = demo_weights(256)
+    got = compare_paths(w)
+    assert got["inflate_bit_exact_bf16"] is True
+    assert got["int8_bytes_match_source"] is True
+    assert got["rmse_nested_nf8"] < got["rmse_nf4"] / 5
+    assert got["rmse_nested_nf8"] < 5e-3
+    assert abs(got["rmse_nested_nf8"] - got["rmse_uniform_int8"]) < 5e-3
+
+
+def test_vram_map_phi4_nested_fits_12g():
+    from vram_map import map_profile
+
+    m = map_profile("phi4-mini", plug="nested", vram_gib=12.0, ctx=4096)
+    assert m["schema"] == "vram_map_v1"
+    assert m["train_ok"] is False
+    assert m["n_elem_linears"] == 3_221_225_472
+    assert m["budget"]["fits"] is True
+    assert m["budget"]["hole_bytes"] == 3_221_225_472 // 2
+    bit = map_profile("phi4-mini", plug="bitplane", vram_gib=12.0, ctx=4096)
+    assert bit["budget"]["plug_all_bytes"] == 3_221_225_472 * 2
+    tight = map_profile("llama-8b", plug="bitplane", vram_gib=8.0, ctx=8192, batch=1)
+    assert "fits" in tight["budget"]
+
+
+def test_mapped_int8_pin_nested():
+    out_f, in_f = 8, 64
+    w_src = demo_weights(out_f * in_f)
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / "src"
+        src.mkdir()
+        write_safetensors(
+            str(src / "model.safetensors"),
+            [
+                ("lin.weight", "BF16", (out_f, in_f), pack_bf16(w_src)),
+                ("model.norm.weight", "BF16", (8,), pack_bf16([1.0] * 8)),
+            ],
+        )
+        (src / "config.json").write_text(json.dumps({"model_type": "phi3", "hidden_size": 8}) + "\n")
+        dst = Path(td) / "pin"
+        got = convert_pin(
+            src,
+            dst,
+            policy=Policy(dest="mapped-int8", plug="nested", dense="quantize", profile="phi4-mini"),
+        )
+        pin = got["pin"]
+        assert pin["schema"] == "keystone_int8_pin_v1"
+        assert pin["dest"] == "mapped-int8"
+        assert pin["plug"] == "nested"
+        assert pin["train_ok"] is False
+        assert (dst / "vram_map.json").is_file()
+        vmap = json.loads((dst / "vram_map.json").read_text())
+        assert vmap["schema"] == "vram_map_v1"
+        assert vmap["plug"] == "nested"
+        with SafeTensorsFile(str(dst / "model.safetensors")) as st:
+            assert st.tensors["lin.weight"].dtype == "U8"
+            assert "lin.weight.plug" in st.tensors
+            assert "lin.weight.int8_scale" in st.tensors
+            assert "lin.weight.absmax" in st.tensors
+            assert "lin.weight.keystone_state" in st.tensors
+            assert "_nf8_cells" in st.tensors
+
+
+def test_mapped_int8_pin_bitplane():
+    out_f, in_f = 8, 64
+    w_src = demo_weights(out_f * in_f)
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / "src"
+        src.mkdir()
+        write_safetensors(
+            str(src / "model.safetensors"),
+            [
+                ("lin.weight", "BF16", (out_f, in_f), pack_bf16(w_src)),
+                ("model.norm.weight", "BF16", (8,), pack_bf16([1.0] * 8)),
+            ],
+        )
+        dst = Path(td) / "pin"
+        got = convert_pin(
+            src,
+            dst,
+            policy=Policy(dest="mapped-int8", plug="bitplane", dense="quantize"),
+        )
+        pin = got["pin"]
+        assert pin["schema"] == "keystone_int8_pin_v1"
+        assert pin["plug"] == "bitplane"
+        with SafeTensorsFile(str(dst / "model.safetensors")) as st:
+            assert st.tensors["lin.weight.plug"].dtype == "U16"
+            assert "lin.weight.absmax" not in st.tensors
+            assert "lin.weight.int8_scale" in st.tensors
+            hole = st.read_bytes("lin.weight")
+            plug = st.read_bytes("lin.weight.plug")
+        from keystone import inflate
+
+        rec = inflate(hole, plug, out_f * in_f)
+        assert pack_bf16(rec) == pack_bf16(w_src)
+
+
+def test_mapped_int8_refuses_nf4_source():
+    out_f, in_f = 8, 64
+    w = demo_weights(out_f * in_f)
+    qw, am = quantize_nf4(w, blocksize=64)
+    with tempfile.TemporaryDirectory() as td:
+        src = Path(td) / "src"
+        src.mkdir()
+        state = json.dumps({"quant_type": "nf4", "blocksize": 64, "shape": [out_f, in_f]}).encode()
+        write_safetensors(
+            str(src / "model.safetensors"),
+            [
+                ("lin.weight", "U8", (len(qw), 1), bytes(qw)),
+                ("lin.weight.absmax", "F32", (len(am),), pack_f32(am)),
+                ("lin.weight.quant_map", "F32", (16,), pack_f32(list(NF4_CODEBOOK))),
+                ("lin.weight.quant_state.bitsandbytes__nf4", "U8", (len(state),), state),
+            ],
+        )
+        dst = Path(td) / "pin"
+        try:
+            convert_pin(src, dst, policy=Policy(dest="mapped-int8", allow_requant=True))
+            raise AssertionError("mapped-int8 must HARD_BLOCK NF4 even with --allow-requant")
+        except ValueError as e:
+            assert "HARD_BLOCK" in str(e)
+            assert "within-cell" in str(e)
+
+
+def test_cli_map():
+    r = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "bf16_to_int8.py"),
+            "map",
+            "--profile",
+            "phi4-mini",
+            "--plug",
+            "nested",
+            "--vram-gib",
+            "12",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    m = json.loads(r.stdout)
+    assert m["budget"]["fits"] is True
+    assert m["compute"] == "inflate_then_int8"
+
+
 if __name__ == "__main__":
     test_codebook_ends()
     test_nf4_roundtrip_zero_and_scale()
@@ -501,4 +649,10 @@ if __name__ == "__main__":
     test_web_title_dest_is_bf16()
     test_prompt_hub_urls()
     test_gpu_compare_within_half_scale()
-    print("TEST_NF4_TO_INT8_GREEN bf16_to_int8 bf16_to_nf4 nested_nf8 refuse_requant gpu_compare NOT_train_ok")
+    test_keystone_bit_exact_and_int8_match()
+    test_vram_map_phi4_nested_fits_12g()
+    test_mapped_int8_pin_nested()
+    test_mapped_int8_pin_bitplane()
+    test_mapped_int8_refuses_nf4_source()
+    test_cli_map()
+    print("TEST_NF4_TO_INT8_GREEN bf16_to_int8 mapped_int8 keystone vram_map refuse_requant NOT_train_ok")
