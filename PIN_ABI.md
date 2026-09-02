@@ -7,8 +7,38 @@ Default source is **dense BF16/F16**. Dest:
 | `int8` | `bf16_to_int8_pin_v1` (legacy `nf4_to_int8_pin_v1` still loads) | INT8 pin loader L0 |
 | `nf4` | `bf16_to_nf4_pin_v1` | fit, owned NF4 |
 | `nested-nf8` | `nested_nf8_pin_v1` | hole=NF4 nibble, plug=4-bit sub-cell. `w=NF8_CELLS[h][p]*absmax` |
+| `mapped-int8` | `keystone_int8_pin_v1` | **VRAM mapper.** 4-bit hole in VRAM, plug on host, inflate then INT8 GEMM |
 
-NF4 sources are HARD_BLOCK without `--allow-requant`. `nested-nf8` **never** from NF4 (no within-cell bits).
+NF4 sources are HARD_BLOCK without `--allow-requant`. `nested-nf8` and `mapped-int8` **never** from NF4 (no within-cell bits).
+
+## mapped-int8 / `keystone_int8_pin_v1`
+
+Run path: **INT8 compute, NF4-sized VRAM**. One hop from Microsoft BF16 (or F16/FP32). See [MAPPED_INT8.md](MAPPED_INT8.md).
+
+```
+VRAM:  hole (4 bit/w) + absmax (nested) + int8_scale + embed/norms + KV + 1-layer plug ring
+RAM:   remaining plug
+GEMM:  inflate(hole, plug[L]) → INT8  (or f32 dequant fallback)
+```
+
+`--plug nested` (default): plug is 4-bit sub-cell inside the NF4 **parent geometry**. Quality ≈ uniform INT8. VRAM ≈ NF4. This is **not** reading an NF4 pin.
+
+`--plug bitplane`: plug is 12 IEEE LSBs. Inflate is **bit-exact BF16**, then INT8. Host plug is 2 bytes/w.
+
+Per linear:
+
+- `{stem}.weight` U8 packed hole (VRAM)
+- `{stem}.weight.plug` U8 (nested) or U16 (bitplane) — **host**
+- `{stem}.weight.absmax` F32 (nested only)
+- `{stem}.weight.quant_map` F32 16 (nested only)
+- `{stem}.weight.int8_scale` F32 — `amax/127` of the inflated weights
+- `{stem}.weight.keystone_state` JSON
+- `_nf8_cells` F32 [16,16] when nested
+- `vram_map.json` — placement vs `--vram-gib` (default 12)
+
+Do not inner-loop PCIe. Stream plug of layer L+1 while GEMM runs on L.
+
+`python3 bf16_to_int8.py map --profile phi4-mini --plug nested --vram-gib 12` writes the map without converting weights.
 
 ## nested_nf8_pin_v1
 

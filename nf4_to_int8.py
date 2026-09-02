@@ -123,13 +123,13 @@ def main(argv: list[str] | None = None) -> int:
     pin_p = sub.add_parser("pin", help="one-hop convert: dense BF16/F16/F32 → INT8 or NF4 pin")
     pin_p.add_argument("--src", required=True, help="HF model dir or model.safetensors (BF16/F16)")
     pin_p.add_argument("--out", required=True, help="output pin directory")
-    pin_p.add_argument("--to", choices=("int8", "nf4", "nested-nf8"), default="int8", help="dest pin. default int8")
+    pin_p.add_argument("--to", choices=("int8", "nf4", "nested-nf8", "mapped-int8"), default="int8", help="dest pin. default int8")
     pin_p.add_argument("--int8-blocksize", type=int, default=64, help="block size for INT8 or NF4")
     pin_p.add_argument("--dry-run", action="store_true")
     pin_p.add_argument(
         "--allow-requant",
         action="store_true",
-        help="permit NF4/FP4 sources (lossy second hop). off by default",
+        help="permit NF4/FP4 sources (lossy second hop). off by default. Never applies to mapped-int8 / nested-nf8.",
     )
     pin_p.add_argument(
         "--dense",
@@ -143,6 +143,28 @@ def main(argv: list[str] | None = None) -> int:
         default="copy",
         help="token embeddings / lm_head. default copy",
     )
+    pin_p.add_argument(
+        "--plug",
+        choices=("nested", "bitplane"),
+        default="nested",
+        help="mapped-int8 only: nested=4-bit NF8 plug (INT8-class); bitplane=12-bit exact BF16",
+    )
+    pin_p.add_argument("--vram-gib", type=float, default=12.0, help="GPU VRAM budget for vram_map.json")
+    pin_p.add_argument("--ctx", type=int, default=4096, help="decode/prefill context for KV estimate")
+    pin_p.add_argument("--batch", type=int, default=1)
+    pin_p.add_argument(
+        "--profile",
+        default="phi4-mini",
+        help="vram_map profile id: phi4-mini | llama-8b | qwen-7b",
+    )
+
+    map_p = sub.add_parser("map", help="VRAM map only (no weight convert). 4-bit hole + host plug.")
+    map_p.add_argument("--profile", default="phi4-mini", choices=("phi4-mini", "llama-8b", "qwen-7b"))
+    map_p.add_argument("--plug", choices=("nested", "bitplane"), default="nested")
+    map_p.add_argument("--vram-gib", type=float, default=12.0)
+    map_p.add_argument("--ctx", type=int, default=4096)
+    map_p.add_argument("--batch", type=int, default=1)
+    map_p.add_argument("--out", type=Path, default=None, help="optional vram_map.json path")
 
     fix_p = sub.add_parser("fixture", help="write a tiny 8x64 INT8 pin for orch loader CI")
     fix_p.add_argument("--out", required=True, help="directory; writes _src/ and int8_pin/")
@@ -174,6 +196,21 @@ def main(argv: list[str] | None = None) -> int:
         from pin_convert import cmd_pin
 
         return cmd_pin(args)
+    if args.cmd == "map":
+        from vram_map import map_profile
+
+        got = map_profile(
+            args.profile,
+            plug=args.plug,
+            vram_gib=args.vram_gib,
+            ctx=args.ctx,
+            batch=args.batch,
+        )
+        text = json.dumps(got, indent=2)
+        if args.out:
+            Path(args.out).write_text(text + "\n")
+        print(text)
+        return 0
     if args.cmd == "fixture":
         from pin_convert import write_tiny_fixture
 

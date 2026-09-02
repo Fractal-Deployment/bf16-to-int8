@@ -2,6 +2,8 @@
 
 VRAM holds a **4-bit-sized holey bitplane** of BF16. Host RAM holds the **plug** (the missing bits, entropy-coded). Inflate is **bitwise complete**, not codebook lookup.
 
+**Product dest:** `--to mapped-int8` writes this layout (or nested-NF8 geometry) plus INT8 scales. See [MAPPED_INT8.md](MAPPED_INT8.md) and [PIN_ABI.md](PIN_ABI.md) (`keystone_int8_pin_v1`). Source is dense BF16/F16/FP32. NF4 is refused.
+
 Not QLoRA. Not W4A8 lattice. Not LAR UV. `train_ok=false`.
 
 Mojo is **not** the only NVVM path. See § languages.

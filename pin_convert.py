@@ -35,6 +35,8 @@ from nf4 import (
 )
 from nested_nf import NF8_CELLS, cells_flat, decode_nested, encode_nested
 from safetensors_io import SafeTensorsFile, SafeTensorsSet, write_safetensors
+from keystone import inflate, split_bf16
+from vram_map import map_from_modules, map_profile
 
 COPY_SIDE_FILES = (
     "config.json",
@@ -94,10 +96,15 @@ DENSE_DTYPES = ("BF16", "F16", "F32")
 
 @dataclass
 class Policy:
-    dest: str = "int8"  # int8 | nf4 | nested-nf8
+    dest: str = "int8"  # int8 | nf4 | nested-nf8 | mapped-int8
     allow_requant: bool = False  # NF4/GPTQ already quantized → refuse unless set
     dense: str = "quantize"  # quantize | copy  (16-bit linears)
     embed: str = "copy"  # copy | quantize
+    plug: str = "nested"  # nested | bitplane  (mapped-int8)
+    vram_gib: float = 12.0
+    ctx: int = 4096
+    batch: int = 1
+    profile: str = "phi4-mini"
     # norms always copy
 
 
@@ -111,6 +118,8 @@ def _dest_schema(dest: str) -> str:
         return "bf16_to_nf4_pin_v1"
     if dest == "nested-nf8":
         return "nested_nf8_pin_v1"
+    if dest == "mapped-int8":
+        return "keystone_int8_pin_v1"
     return INT8_PIN_SCHEMA  # orch INT8 loader ABI (legacy nf4_to_int8_pin_v1 still loads)
 
 
@@ -515,6 +524,93 @@ def _append_nested(
     out_tensors.append((stem + ".weight.nested_state", "U8", (len(raw_state),), raw_state))
 
 
+def convert_dense_to_mapped(
+    st: SafeTensorsFile,
+    name: str,
+    blocksize: int,
+    plug: str,
+) -> Tuple[bytes, bytes, List[float], List[float], dict]:
+    """Hole (VRAM) + plug (host) + INT8 scales from inflated weights.
+
+    Source is dense BF16/F16/F32. NF4 is HARD_BLOCK (no within-cell bits).
+    """
+    info = st.tensors[name]
+    raw = st.read_bytes(name)
+    f32 = unpack_dense(info.dtype, raw, info.shape)
+    n_elem = numel_of(info.shape)
+    f32 = f32[:n_elem]
+    i8_bs = blocksize if blocksize > 0 else 64
+    stem = name[: -len(".weight")] if name.endswith(".weight") else name
+    shape = tuple(int(x) for x in info.shape)
+    if plug == "bitplane":
+        hole, plug_b = split_bf16(f32)
+        rec = inflate(hole, plug_b, n_elem)
+        q8, scales = quantize_int8_symmetric(rec, blocksize=i8_bs)
+        absmax: List[float] = []
+        dst = "keystone_bitplane"
+    else:
+        nf4_idx, plug_i, absmax = encode_nested(f32, blocksize=i8_bs)
+        hole = bytes(pack_indices(nf4_idx))
+        plug_b = bytes(pack_indices(plug_i))
+        rec = decode_nested(nf4_idx, plug_i, absmax, i8_bs)
+        q8, scales = quantize_int8_symmetric(rec, blocksize=i8_bs)
+        dst = "nested_nf8"
+    i8_recon = dequant_int8(q8, scales, i8_bs)
+    meta = {
+        "src": stem,
+        "src_quant": info.dtype.lower(),
+        "dst_quant": "mapped_int8",
+        "plug": plug,
+        "shape": [int(shape[0]), int(shape[1])] if len(shape) == 2 else list(shape),
+        "n_elem": n_elem,
+        "nf4_blocksize": i8_bs,
+        "int8_blocksize": i8_bs,
+        "n_scales": len(scales),
+        "rmse_vs_src_dequant": rmse(f32, rec),
+        "rmse_vs_int8_of_inflate": rmse(f32, i8_recon),
+        "max_abs_err_vs_src_dequant": max_abs_err(f32, rec),
+        "hole_bytes": len(hole),
+        "plug_bytes": len(plug_b),
+        "compute": "inflate_then_int8",
+        "pack": dst,
+    }
+    return hole, plug_b, absmax, scales, meta
+
+
+def _append_mapped(
+    out_tensors: list,
+    stem: str,
+    shape: Tuple[int, ...],
+    hole: bytes,
+    plug_b: bytes,
+    absmax: List[float],
+    scales: List[float],
+    meta: dict,
+) -> None:
+    plug = meta["plug"]
+    out_tensors.append((stem + ".weight", "U8", (len(hole), 1), hole))
+    if plug == "bitplane":
+        out_tensors.append((stem + ".weight.plug", "U16", (len(plug_b) // 2,), plug_b))
+    else:
+        out_tensors.append((stem + ".weight.plug", "U8", (len(plug_b), 1), plug_b))
+        out_tensors.append((stem + ".weight.absmax", "F32", (len(absmax),), pack_f32(absmax)))
+        out_tensors.append((stem + ".weight.quant_map", "F32", (16,), pack_f32(list(NF4_CODEBOOK))))
+    out_tensors.append((stem + ".weight.int8_scale", "F32", (len(scales),), pack_f32(scales)))
+    state = {
+        "quant_type": "mapped_int8",
+        "plug": plug,
+        "blocksize": meta["int8_blocksize"],
+        "shape": list(shape),
+        "src_quant": meta["src_quant"],
+        "compute": "inflate_then_int8",
+        "vram": "hole",
+        "host": "plug",
+        "train_ok": False,
+    }
+    raw_state = json.dumps(state, separators=(",", ":")).encode("utf-8")
+    out_tensors.append((stem + ".weight.keystone_state", "U8", (len(raw_state),), raw_state))
+
+
 def convert_pin(
     src: Path,
     out_dir: Path,
@@ -559,12 +655,16 @@ def convert_pin(
                 other.append(name)
 
         dest = policy.dest
-        if dest not in ("int8", "nf4", "nested-nf8"):
-            raise ValueError(f"dest must be int8, nf4, or nested-nf8, got {dest}")
-        if nf4_stems and dest == "nested-nf8":
+        if dest not in ("int8", "nf4", "nested-nf8", "mapped-int8"):
+            raise ValueError(f"dest must be int8, nf4, nested-nf8, or mapped-int8, got {dest}")
+        if nf4_stems and dest in ("nested-nf8", "mapped-int8"):
             raise ValueError(
-                "HARD_BLOCK: nested-nf8 needs BF16/F16. NF4 has no within-cell plug."
+                "HARD_BLOCK: nested-nf8 / mapped-int8 need BF16/F16/F32. "
+                "NF4 has no within-cell bits to recover."
             )
+        plug_mode = policy.plug if dest == "mapped-int8" else "nested"
+        if dest == "mapped-int8" and plug_mode not in ("nested", "bitplane"):
+            raise ValueError("mapped-int8 --plug must be nested or bitplane")
         dense_q = policy.dense in ("int8", "nf4", "quantize")
         embed_q = policy.embed in ("int8", "nf4", "quantize")
 
@@ -582,6 +682,8 @@ def convert_pin(
                 "dense": "quantize" if dense_q else "copy",
                 "embed": "quantize" if embed_q else "copy",
                 "norm": "copy",
+                "plug": plug_mode if dest == "mapped-int8" else None,
+                "vram_gib": policy.vram_gib if dest == "mapped-int8" else None,
             },
             "blocksize": int8_blocksize,
             "train_ok": False,
@@ -616,6 +718,11 @@ def convert_pin(
                         st, name, int8_blocksize or 64
                     )
                     _append_nested(out_tensors, stem, shape, hole, plug, absmax, meta)
+                elif dest == "mapped-int8":
+                    hole, plug_b, absmax, scales, meta = convert_dense_to_mapped(
+                        st, name, int8_blocksize or 64, plug_mode
+                    )
+                    _append_mapped(out_tensors, stem, shape, hole, plug_b, absmax, scales, meta)
                 else:
                     packed, absmax, meta = convert_dense_to_nf4(st, name, int8_blocksize or 64)
                     _append_nf4(out_tensors, stem, shape, packed, absmax, meta)
@@ -668,13 +775,15 @@ def convert_pin(
             out_tensors.append((name, info.dtype, info.shape, st.read_bytes(name)))
             n_copied += 1
 
-        if dest == "nested-nf8":
+        if dest == "nested-nf8" or (dest == "mapped-int8" and plug_mode == "nested"):
             out_tensors.append(("_nf8_cells", "F32", (16, 16), pack_f32(cells_flat())))
 
     if dest == "nf4":
         qtag = "nf4_owned_single_quant"
     elif dest == "nested-nf8":
         qtag = "nested_nf8_gaussian_cell_split"
+    elif dest == "mapped-int8":
+        qtag = "mapped_int8_hole_plug"
     else:
         qtag = "int8_symmetric_per_block_zp0"
     write_safetensors(
@@ -705,9 +814,11 @@ def convert_pin(
         "n_passthrough": n_copied,
         "src_kinds": sorted(src_kinds),
         "policy": plan["policy"],
-        "int8_blocksize": int8_blocksize if dest == "int8" else 0,
-        "nf4_blocksize": int8_blocksize if dest in ("nf4", "nested-nf8") else 0,
-        "int8_scheme": "symmetric_per_block_zp0" if dest == "int8" else None,
+        "int8_blocksize": int8_blocksize if dest in ("int8", "mapped-int8") else 0,
+        "nf4_blocksize": int8_blocksize if dest in ("nf4", "nested-nf8", "mapped-int8") else 0,
+        "int8_scheme": "symmetric_per_block_zp0" if dest in ("int8", "mapped-int8") else None,
+        "plug": plug_mode if dest == "mapped-int8" else None,
+        "compute": "inflate_then_int8" if dest == "mapped-int8" else None,
         "rmse_mean": (sum(rmses) / len(rmses)) if rmses else 0.0,
         "max_abs_err_max": max(maxes) if maxes else 0.0,
         "train_ok": False,
@@ -718,6 +829,31 @@ def convert_pin(
     (out_dir / "CONVERT_REPORT.json").write_text(
         json.dumps({"pin": pin, "modules": reports}, indent=2) + "\n"
     )
+    if dest == "mapped-int8":
+        vmap = map_from_modules(
+            reports,
+            plug=plug_mode,
+            vram_gib=policy.vram_gib,
+            profile_id=policy.profile,
+            ctx=policy.ctx,
+            batch=policy.batch,
+            blocksize=int8_blocksize or 64,
+        )
+        try:
+            vmap_profile = map_profile(
+                policy.profile,
+                plug=plug_mode,
+                vram_gib=policy.vram_gib,
+                ctx=policy.ctx,
+                batch=policy.batch,
+                blocksize=int8_blocksize or 64,
+            )
+            vmap["profile_plan"] = vmap_profile
+        except ValueError:
+            pass
+        (out_dir / "vram_map.json").write_text(json.dumps(vmap, indent=2) + "\n")
+        pin["vram_map"] = "vram_map.json"
+        (out_dir / "pin.json").write_text(json.dumps(pin, indent=2) + "\n")
 
     cfg_path = src_dir / "config.json"
     if cfg_path.is_file():
@@ -726,11 +862,14 @@ def convert_pin(
         except json.JSONDecodeError:
             cfg = {}
         cfg["quantization_config"] = {
-            "quant_method": INT8_PIN_QUANT_METHOD,
+            "quant_method": (
+                "keystone_int8_pin" if dest == "mapped-int8" else INT8_PIN_QUANT_METHOD
+            ),
             "quant_method_legacy": "nf4_to_int8_pin",
-            "load_in_8bit": True,
-            "int8_scheme": "symmetric_per_block_zp0",
+            "load_in_8bit": dest in ("int8", "mapped-int8"),
+            "int8_scheme": "symmetric_per_block_zp0" if dest in ("int8", "mapped-int8") else None,
             "int8_blocksize": int8_blocksize,
+            "plug": plug_mode if dest == "mapped-int8" else None,
             "converted_from": sorted(src_kinds),
             "train_ok": False,
         }
@@ -807,6 +946,11 @@ def cmd_pin(args: Any) -> int:
         allow_requant=bool(getattr(args, "allow_requant", False)),
         dense=dense,
         embed=embed,
+        plug=getattr(args, "plug", "nested"),
+        vram_gib=float(getattr(args, "vram_gib", 12.0)),
+        ctx=int(getattr(args, "ctx", 4096)),
+        batch=int(getattr(args, "batch", 1)),
+        profile=getattr(args, "profile", "phi4-mini"),
     )
     got = convert_pin(
         src,
