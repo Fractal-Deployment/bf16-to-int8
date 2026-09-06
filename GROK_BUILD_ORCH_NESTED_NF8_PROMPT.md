@@ -27,7 +27,6 @@ Read first: that repo `PIN_ABI.md` nested_nf8 section, `artifacts/build_20260719
    - norms / embeds passthrough
 3. **Expand once at load** (Mode A, same idea as NF4 nested-absmax expand): dequant nested_nf8 → f32 into existing registry slots.
 4. Opt-in: `ORCH_NESTED_NF8_PIN=/abs/path`. Unset = today’s NF4 pin. Do not invent `ORCH_BASE_PACK`. Do not change product default.
-5. Board: `base_dtype=nested_nf8_expanded` · `train_ok=false` · `measured_omega=false` · `G1=OPEN`
 6. Tiny synthetic pin from converter tests for CI. No 3 GiB blob.
 
 ## L1 — not this prompt (after L0 green)
@@ -38,9 +37,7 @@ Keep hole+plug **resident**. H-TILE S3: second `cp.async` of plug next to `sh_qp
 
 - Uniform INT8 MMA as this path
 - Claim nested NF8 is bit-exact BF16
-- train_ok=true · Unsloth-beat · boxing TUI
 - Mojo required (CUDA only)
 
 ## Done when
 
-`ORCH_NESTED_NF8_PIN=...` 1-step smoke uses expanded weights; unset env is bit-identical NF4; board seals; pushed.

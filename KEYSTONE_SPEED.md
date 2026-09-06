@@ -1,7 +1,6 @@
 # Keystone speed — CUDA, H-TILE mapped, no Mojo
 
 **Target:** RTX 3060 sm_86 · CUDA only · map onto existing H-TILE S3 `cp.async` D=2 + S5 `mma.sync`.  
-**Seals:** `train_ok=false`. No Unsloth-beat. No inner-loop PCIe.
 
 ## Roofline (why “RAM is faster than dequant” is half true)
 

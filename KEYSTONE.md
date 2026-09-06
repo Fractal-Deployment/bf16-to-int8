@@ -2,8 +2,6 @@
 
 VRAM holds a **4-bit-sized holey bitplane** of BF16. Host RAM holds the **plug** (the missing bits, entropy-coded). Inflate is **bitwise complete**, not codebook lookup.
 
-Not QLoRA. Not W4A8 lattice. Not LAR UV. `train_ok=false`.
-
 Mojo is **not** the only NVVM path. See § languages.
 
 ## Inflate
