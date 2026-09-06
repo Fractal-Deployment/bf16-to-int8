@@ -24,7 +24,6 @@ Read first (do not skim):
    - `base_dtype=int8_pin` or `int8_pin_expanded`
    - `int8_gemm=false`
    - `nf4_product_path` unchanged unless this pin is actually selected
-   - `train_ok=false` `measured_omega=false` `G1=OPEN`
 6. Opt-in only. Suggested env: `ORCH_INT8_PIN=/abs/path/to/pin` (dir). Default unset = today’s NF4 pin. **Do not** invent `ORCH_BASE_PACK`.
 7. Unit test with a **tiny** synthetic pin (the converter tests already write one). Do not require the 3 GiB Phi-4 blob in CI.
 
@@ -35,7 +34,6 @@ Read first (do not skim):
 - Changing product default off NF4
 - Claiming step/s or Unsloth-beat
 - Touching boxing TUI
-- Setting `train_ok=true`
 
 ## Done when
 

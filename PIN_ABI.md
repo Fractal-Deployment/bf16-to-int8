@@ -21,10 +21,6 @@ Per linear:
 - `{stem}.weight.nested_state` JSON
 - `_nf8_cells` F32 [16,16] once per file (SSOT also `include/nf8_cells.h`)
 
-L0 expand at load. L1 H-TILE: `cp.async` hole + plug, lookup `NF8_CELLS[hole][plug]`. CUDA. `train_ok=false`.
-
-
-
 ## Directory
 
 ```
@@ -69,7 +65,6 @@ Loader requires `schema=bf16_to_int8_pin_v1` (or legacy `nf4_to_int8_pin_v1`). E
 `src_quant` in each `int8_state` may be `nf4`, `fp4`, `bf16`, `f16`, or `f32`. Dequant formula is the same.
 
 **Always copied (never INT8):** RMSNorm, LayerNorm, bias, rotary `inv_freq`.
-
 
 ## Per converted linear (was NF4)
 
@@ -132,4 +127,3 @@ typedef struct {
 - Default the product pin off NF4
 - Claim INT8 Tensor-Core MMA from this file (storage only)
 - Convert per step
-- Set `train_ok=true`

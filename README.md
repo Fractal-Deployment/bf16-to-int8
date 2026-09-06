@@ -16,7 +16,6 @@ python3 nf4_to_int8.py pin --src /path/to/phi-4-mini-bf16 --out /path/to/nf4-pin
 # nested NF8: keep the 16 Gaussian cells, plug = sub-index (orch H-TILE L0/L1)
 python3 nf4_to_int8.py pin --src /path/to/phi-4-mini-bf16 --out /path/to/nested-nf8 --to nested-nf8
 
-
 python3 nf4_to_int8.py pin --src model.safetensors --out /tmp/pin --dry-run
 # HF snapshots with model.safetensors.index.json (2+ shards) are read as one catalog.
 ```

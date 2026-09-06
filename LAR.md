@@ -2,8 +2,6 @@
 
 Not QLoRA. Not W4A8-only. One INT4 **lattice** (pad → INT8 MMA is lossless for the codes) plus the **residual plane** \(R = W_{\mathrm{BF16}} - \hat W_4\) kept in **host RAM** and software-pipelined like a third cache.
 
-Seals: `train_ok=false`. 64×64 RMSE only, not PPL.
-
 ## Why a third plane
 
 | | VRAM | Compute | Residual |
