@@ -60,4 +60,4 @@ Optional: inflate a whole panel, then **cuBLASLt BF16** (orch U2). Faster than a
 2. CUDA: pin plug, double-buffer `cudaMemcpyAsync`, dummy kernel `inflate_or`.
 3. Wire inflate into H-TILE S3 load path; keep S3 FMA golden vs `inflate` host.
 4. Flip S5 `mma.sync` **bf16** once goldens hold.
-5. Board: ms/step hole-only vs complete vs NF4 H-TILE. No `train_ok`.
+5. Board: ms/step hole-only vs complete vs NF4 H-TILE. No `training_cleared`.

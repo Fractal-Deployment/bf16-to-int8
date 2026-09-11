@@ -41,7 +41,7 @@ Per linear:
   "n_passthrough": 72,
   "int8_blocksize": 64,
   "int8_scheme": "symmetric_per_block_zp0",
-  "train_ok": false
+  "training_cleared": false
 }
 ```
 
@@ -58,7 +58,7 @@ Loader requires `schema=bf16_to_int8_pin_v1` (or legacy `nf4_to_int8_pin_v1`). E
   "policy": {"linears": "int8", "dense": "int8", "embed": "copy", "norm": "copy"},
   "int8_blocksize": 64,
   "int8_scheme": "symmetric_per_block_zp0",
-  "train_ok": false
+  "training_cleared": false
 }
 ```
 
@@ -83,7 +83,7 @@ Loader requires `schema=bf16_to_int8_pin_v1` (or legacy `nf4_to_int8_pin_v1`). E
   "shape": [out, in],
   "src_quant": "nf4",
   "double_quant": "double",
-  "train_ok": false
+  "training_cleared": false
 }
 ```
 

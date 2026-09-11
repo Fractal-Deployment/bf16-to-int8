@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hangover filename. Golden checks for bf16_to_int8 / nf4_to_int8 alias. Not train_ok."""
+"""Hangover filename. Golden checks for bf16_to_int8 / nf4_to_int8 alias. Not training_cleared."""
 from __future__ import annotations
 
 import json
@@ -62,7 +62,7 @@ def test_convert_rmse_small():
     w = demo_weights(256)
     qw, am = quantize_nf4(w, blocksize=64)
     got = convert(bytes(qw), am, 256, 64, NIBBLE_LO_THEN_HI, 64)
-    assert got["meta"]["train_ok"] is False
+    assert got["meta"]["training_cleared"] is False
     assert got["meta"]["rmse_vs_nf4_dequant"] < 0.02
     assert got["meta"]["max_abs_err_vs_nf4_dequant"] < 0.05
     assert rmse(got["f32"], got["recon"]) == got["meta"]["rmse_vs_nf4_dequant"]
@@ -133,7 +133,7 @@ def test_pin_single_quant_roundtrip():
         dst = Path(td) / "pin"
         got = convert_pin(src, dst, int8_blocksize=64, policy=Policy(allow_requant=True))
         pin = got["pin"]
-        assert pin["train_ok"] is False
+        assert pin["training_cleared"] is False
         assert pin["n_nf4_modules"] == 1
         assert pin["n_passthrough"] == 1
         assert pin["rmse_mean"] < 0.02
@@ -186,7 +186,7 @@ def test_fixture_cli():
         )
         pin = json.loads(r.stdout)
         assert pin["schema"] == "bf16_to_int8_pin_v1"
-        assert pin["train_ok"] is False
+        assert pin["training_cleared"] is False
         assert (Path(td) / "int8_pin" / "model.safetensors").is_file()
         assert (Path(td) / "int8_pin" / "pin.json").is_file()
 
@@ -236,7 +236,7 @@ def test_double_quant_module_pin():
         got = convert_pin(src, dst, policy=Policy(allow_requant=True))
         assert got["pin"]["n_nf4_modules"] == 1
         assert got["modules"][0]["double_quant"] == "double"
-        assert got["pin"]["train_ok"] is False
+        assert got["pin"]["training_cleared"] is False
 
 
 def test_bf16_roundtrip_bits():
@@ -501,4 +501,4 @@ if __name__ == "__main__":
     test_web_title_dest_is_bf16()
     test_prompt_hub_urls()
     test_gpu_compare_within_half_scale()
-    print("TEST_NF4_TO_INT8_GREEN bf16_to_int8 bf16_to_nf4 nested_nf8 refuse_requant gpu_compare NOT_train_ok")
+    print("TEST_NF4_TO_INT8_GREEN bf16_to_int8 bf16_to_nf4 nested_nf8 refuse_requant gpu_compare not_training_cleared")

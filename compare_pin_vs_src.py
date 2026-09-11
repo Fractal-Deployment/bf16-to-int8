@@ -8,7 +8,7 @@ Two residuals, kept separate:
 2. Scheme fuzz: dequant (i8 * per-block scale) vs original BF16. Bound is
    half the block scale (round-to-nearest, zp=0, clip ±127).
 
-Carve-out. Not orch train. train_ok=false.
+Carve-out. Not orch train. training_cleared=false.
 """
 from __future__ import annotations
 
@@ -209,8 +209,8 @@ def main() -> int:
         "worst_max_abs": worst,
         "worst_rmse": worst_rmse,
         "seconds": time.time() - t0,
-        "train_ok": False,
-        "measured_omega": False,
+        "training_cleared": False,
+        "omega_was_measured": False,
         "note": (
             "pin.json rmse_mean=0.0 was skipped large-tensor RMSE, not lossless. "
             "This report is dequant vs original BF16 plus re-quant byte match."
@@ -224,7 +224,7 @@ def main() -> int:
         f"scheme_within_half_lsb={str(scheme_within_half).lower()} "
         f"rmse={rmse:.8g} max_abs={global_max:.8g} n_over={global_over} "
         f"i8_mis={global_i8_mis} pass_mis={n_pass_mis} "
-        f"n_lin={n_linears} n_elem={total_n} out={out} train_ok=false",
+        f"n_lin={n_linears} n_elem={total_n} out={out} training_cleared=false",
         flush=True,
     )
     return 0 if transfer_exact and scheme_within_half else 3

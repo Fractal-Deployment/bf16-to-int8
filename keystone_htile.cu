@@ -1,7 +1,7 @@
 /* Keystone H-TILE sketch — CUDA only, Ampere sm_86.
  * NF4 codebook replaced by bitwise hole|plug inflate.
  * Plug[L] is already in VRAM (stream-1 memcpy of L+1 overlaps).
- * train_ok=false. Inner-loop memcpy forbidden.
+ * training_cleared=false. Inner-loop memcpy forbidden.
  *
  * nvcc -arch=sm_86 -c keystone_htile.cu
  */

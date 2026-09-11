@@ -1,7 +1,7 @@
 """Keystone hole+plug: split BF16 bitplanes. Inflate is bitwise, not a codebook.
 
 VRAM hole = 4 MSBs/weight packed. RAM plug = 12 LSBs.
-Complete plug → bit-exact BF16. train_ok=false.
+Complete plug → bit-exact BF16. training_cleared=false.
 """
 from __future__ import annotations
 

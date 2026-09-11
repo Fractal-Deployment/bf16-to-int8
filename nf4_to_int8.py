@@ -6,7 +6,7 @@
 
 NF4/bnb-4bit sources need --allow-requant (lossy). Product hop is dense BF16.
 
-Offline pin. Not a dest-pack flip. Not train_ok.
+Offline pin. Not a dest-pack flip. Not training_cleared.
 """
 from __future__ import annotations
 
@@ -61,8 +61,8 @@ def convert(
         "n_int8_scales": len(scales),
         "rmse_vs_nf4_dequant": rmse(f32, recon),
         "max_abs_err_vs_nf4_dequant": max_abs_err(f32, recon),
-        "note": "requant of NF4 dequant. not a train_ok claim. not ORCH_BASE_PACK.",
-        "train_ok": False,
+        "note": "requant of NF4 dequant. not a training_cleared claim. not ORCH_BASE_PACK.",
+        "training_cleared": False,
     }
     return {"q8": q8, "scales": scales, "f32": f32, "recon": recon, "meta": meta}
 
@@ -111,7 +111,7 @@ def run_tensor(args: argparse.Namespace) -> int:
             f"max|e|={m['max_abs_err_vs_nf4_dequant']:.6g}"
         )
         print(f"wrote {args.out_prefix}.i8.bin  {args.out_prefix}.scale.f32.bin  {args.out_prefix}.meta.json")
-        print("requant only. train_ok=false")
+        print("requant only. training_cleared=false")
     return 0
 
 
