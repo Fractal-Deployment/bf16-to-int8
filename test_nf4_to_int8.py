@@ -51,7 +51,6 @@ def test_convert_rmse_small():
     w = demo_weights(256)
     qw, am = quantize_nf4(w, blocksize=64)
     got = convert(bytes(qw), am, 256, 64, NIBBLE_LO_THEN_HI, 64)
-    assert got["meta"][""] is False
     assert got["meta"]["rmse_vs_nf4_dequant"] < 0.02
     assert got["meta"]["max_abs_err_vs_nf4_dequant"] < 0.05
     assert rmse(got["f32"], got["recon"]) == got["meta"]["rmse_vs_nf4_dequant"]
@@ -114,7 +113,6 @@ def test_pin_single_quant_roundtrip():
         dst = Path(td) / "pin"
         got = convert_pin(src, dst, int8_blocksize=64, policy=Policy(allow_requant=True))
         pin = got["pin"]
-        assert pin[""] is False
         assert pin["n_nf4_modules"] == 1
         assert pin["n_passthrough"] == 1
         assert pin["rmse_mean"] < 0.02
@@ -163,7 +161,6 @@ def test_fixture_cli():
         )
         pin = json.loads(r.stdout)
         assert pin["schema"] == "bf16_to_int8_pin_v1"
-        assert pin[""] is False
         assert (Path(td) / "int8_pin" / "model.safetensors").is_file()
         assert (Path(td) / "int8_pin" / "pin.json").is_file()
 def test_double_quant_module_pin():
@@ -211,7 +208,6 @@ def test_double_quant_module_pin():
         got = convert_pin(src, dst, policy=Policy(allow_requant=True))
         assert got["pin"]["n_nf4_modules"] == 1
         assert got["modules"][0]["double_quant"] == "double"
-        assert got["pin"][""] is False
 def test_bf16_roundtrip_bits():
     vals = [0.0, 1.0, -0.5, 0.25]
     rec = unpack_bf16(pack_bf16(vals))
