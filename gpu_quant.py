@@ -1,16 +1,12 @@
 """Optional CUDA INT8 block-quant. Falls back to Python loops if .so missing."""
 from __future__ import annotations
-
 import ctypes
 import math
 from pathlib import Path
 from typing import List, Optional, Tuple, Dict, Any
-
 _LIB = None
 _LIB_TRIED = False
 _SO = Path(__file__).resolve().parent / "cuda" / "libquant_i8.so"
-
-
 def gpu_quant_available() -> bool:
     global _LIB, _LIB_TRIED
     if _LIB is not None:
@@ -53,8 +49,6 @@ def gpu_quant_available() -> bool:
         return True
     except OSError:
         return False
-
-
 def quant_bf16_i8(raw: bytes, blocksize: int = 64) -> Optional[Tuple[bytes, List[float]]]:
     if blocksize != 64 or not gpu_quant_available() or _LIB is None:
         return None
@@ -69,8 +63,6 @@ def quant_bf16_i8(raw: bytes, blocksize: int = 64) -> Optional[Tuple[bytes, List
     if rc != 0:
         return None
     return bytes(q), [float(sc[i]) for i in range(nblk)]
-
-
 def compare_bf16_i8(
     raw_bf16: bytes,
     q8: bytes,

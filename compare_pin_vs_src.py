@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
 """Compare an INT8 pin to its original dense BF16/F16 source.
-
 Two residuals, kept separate:
-
 1. Transfer: re-quant the source with the same GPU kernel and count I8/scale
    mismatches. Zero means the pin bytes are the converter output.
 2. Scheme fuzz: dequant (i8 * per-block scale) vs original BF16. Bound is
    half the block scale (round-to-nearest, zp=0, clip ±127).
-
-Carve-out. Not orch train. training_cleared=false.
+Carve-out. Not orch train. =false.
 """
 from __future__ import annotations
-
 import argparse
 import json
 import math
@@ -19,19 +15,13 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, List
-
 from nf4 import unpack_f32
 from pin_convert import find_weight_files
 from safetensors_io import SafeTensorsFile, SafeTensorsSet
-
 from gpu_quant import compare_bf16_i8, gpu_quant_available, quant_bf16_i8
-
-
 def _open_set(path: Path) -> SafeTensorsSet:
     files = [SafeTensorsFile(str(p)) for p in find_weight_files(path)]
     return SafeTensorsSet(files)
-
-
 def _scale_rel_max(a: List[float], b: List[float]) -> float:
     m = 0.0
     n = min(len(a), len(b))
@@ -41,15 +31,12 @@ def _scale_rel_max(a: List[float], b: List[float]) -> float:
         if r > m:
             m = r
     return m
-
-
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pin", required=True, help="INT8 pin directory")
     ap.add_argument("--src", default="", help="override BF16 snapshot dir")
     ap.add_argument("--out", default="", help="JSON report path")
     args = ap.parse_args()
-
     pin_dir = Path(args.pin)
     pin_json_path = pin_dir / "pin.json"
     if not pin_json_path.is_file():
@@ -63,11 +50,9 @@ def main() -> int:
     if not gpu_quant_available():
         print("HARD_BLOCK: libquant_i8.so / CUDA compare unavailable", file=sys.stderr)
         return 2
-
     t0 = time.time()
     pin_st = _open_set(pin_dir)
     src_st = _open_set(src_dir)
-
     linears: List[Dict[str, Any]] = []
     passthrough: List[Dict[str, Any]] = []
     total_ss = 0.0
@@ -79,7 +64,6 @@ def main() -> int:
     n_linears = 0
     n_pass = 0
     n_pass_mis = 0
-
     names = sorted(pin_st.names())
     for name in names:
         info = pin_st.tensors[name]
@@ -178,7 +162,6 @@ def main() -> int:
                     "byte_mismatch": mis,
                 }
             )
-
     pin_st.close()
     src_st.close()
     rmse = math.sqrt(total_ss / float(total_n)) if total_n else 0.0
@@ -209,8 +192,8 @@ def main() -> int:
         "worst_max_abs": worst,
         "worst_rmse": worst_rmse,
         "seconds": time.time() - t0,
-        "training_cleared": False,
-        "omega_was_measured": False,
+        "": False,
+        "": False,
         "note": (
             "pin.json rmse_mean=0.0 was skipped large-tensor RMSE, not lossless. "
             "This report is dequant vs original BF16 plus re-quant byte match."
@@ -224,11 +207,9 @@ def main() -> int:
         f"scheme_within_half_lsb={str(scheme_within_half).lower()} "
         f"rmse={rmse:.8g} max_abs={global_max:.8g} n_over={global_over} "
         f"i8_mis={global_i8_mis} pass_mis={n_pass_mis} "
-        f"n_lin={n_linears} n_elem={total_n} out={out} training_cleared=false",
+        f"n_lin={n_linears} n_elem={total_n} out={out} =false",
         flush=True,
     )
     return 0 if transfer_exact and scheme_within_half else 3
-
-
 if __name__ == "__main__":
     raise SystemExit(main())

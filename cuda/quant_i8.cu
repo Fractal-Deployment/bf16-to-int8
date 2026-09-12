@@ -1,15 +1,13 @@
 /* BF16/F32 → symmetric INT8 per block (B=64, zp=0, scale=amax/127).
- * Offline pin convert. Not train. training_cleared=false. */
+ * Offline pin convert. Not train. =false. */
 #include <cuda_runtime.h>
 #include <stdint.h>
 #include <math.h>
 #include <stdlib.h>
-
 __device__ __forceinline__ float bf16_to_f32(uint16_t h) {
     uint32_t u = ((uint32_t)h) << 16;
     return __uint_as_float(u);
 }
-
 __global__ void k_quant_bf16(const uint16_t* in, int64_t n, int B, int8_t* q,
                              float* scale) {
     int blk = (int)blockIdx.x;
@@ -41,7 +39,6 @@ __global__ void k_quant_bf16(const uint16_t* in, int64_t n, int B, int8_t* q,
         q[i] = (int8_t)v;
     }
 }
-
 __global__ void k_quant_f32(const float* in, int64_t n, int B, int8_t* q,
                             float* scale) {
     int blk = (int)blockIdx.x;
@@ -73,7 +70,6 @@ __global__ void k_quant_f32(const float* in, int64_t n, int B, int8_t* q,
         q[i] = (int8_t)v;
     }
 }
-
 static int launch(const void* h_in, size_t in_bytes, int64_t n, int B, int bf16,
                   int8_t* h_q, float* h_scale) {
     if (B != 64 || n < 1) return 2;
@@ -118,17 +114,14 @@ static int launch(const void* h_in, size_t in_bytes, int64_t n, int B, int bf16,
     cudaFree(d_s);
     return rc;
 }
-
 extern "C" int quant_bf16_i8_block(const uint16_t* h_in, int64_t n, int B,
                                    int8_t* h_q, float* h_scale) {
     return launch(h_in, (size_t)n * 2u, n, B, 1, h_q, h_scale);
 }
-
 extern "C" int quant_f32_i8_block(const float* h_in, int64_t n, int B, int8_t* h_q,
                                   float* h_scale) {
     return launch(h_in, (size_t)n * 4u, n, B, 0, h_q, h_scale);
 }
-
 /* Dequant error vs original BF16: recon = i8 * scale. Not train. */
 __global__ void k_err_bf16(const uint16_t* in, const int8_t* q, const float* scale,
                            int64_t n, int B, double* blk_ss, float* blk_mx,
@@ -171,7 +164,6 @@ __global__ void k_err_bf16(const uint16_t* in, const int8_t* q, const float* sca
         blk_over[blk] = sh_ov[0];
     }
 }
-
 extern "C" int compare_bf16_i8_block(const uint16_t* h_in, const int8_t* h_q,
                                      const float* h_scale, int64_t n, int B,
                                      double* out_sum_sq, float* out_max_abs,
